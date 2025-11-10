@@ -1,0 +1,55 @@
+// Configuração
+const DELAY_BETWEEN_BATCHES = 7000; // 7 segundos entre batches (ajuste conforme necessário)
+
+// Pega os batches armazenados
+let batches = flow.get('batches');
+
+if (!batches || !Array.isArray(batches)) {
+    node.error("Nenhum batch encontrado. Execute o processamento do CSV primeiro.");
+    node.status({ fill: "red", shape: "ring", text: "Nenhum batch encontrado" });
+    return null;
+}
+
+// Função para enviar um batch
+function sendBatch(index) {
+    if (index >= batches.length) {
+        node.status({
+            fill: "green",
+            shape: "dot",
+            text: `Todos os ${batches.length} batches foram enviados`
+        });
+        return;
+    }
+
+    let currentBatch = batches[index];
+    let [messagesWithoutTimestamp, timestampMessages] = currentBatch;
+
+    node.status({
+        fill: "blue",
+        shape: "ring",
+        text: `Enviando batch ${index + 1}/${batches.length}`
+    });
+
+    // Envia o batch atual
+    node.send([messagesWithoutTimestamp, timestampMessages]);
+
+    // Agenda o próximo batch após o delay
+    if (index + 1 < batches.length) {
+        setTimeout(() => {
+            sendBatch(index + 1);
+        }, DELAY_BETWEEN_BATCHES);
+    } else {
+        // Último batch enviado
+        node.status({
+            fill: "green",
+            shape: "dot",
+            text: `${batches.length} batches enviados`
+        });
+    }
+}
+
+// Inicia o envio a partir do primeiro batch
+sendBatch(0);
+
+// Não retorna nada aqui, pois o envio é feito pela função sendBatch
+return null;
