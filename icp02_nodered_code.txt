@@ -1,0 +1,218 @@
+let text = msg.payload;
+if (typeof text !== 'string') return [
+  [],
+  []
+];
+
+let lines = text.split(/\r?\n/);
+let messages = [];
+let timestampMessages = [];
+
+function buildVariablePath(name) {
+  return `ICP92/${name}`;
+}
+
+function getBrasiliaTimestamp() {
+  let now = new Date();
+  now.setHours(now.getHours() - 3); // Ajuste para UTC-3 (se o servidor já estiver em UTC)
+
+  let yyyy = now.getFullYear();
+  let mm = String(now.getMonth() + 1).padStart(2, '0');
+  let dd = String(now.getDate()).padStart(2, '0');
+  let hh = String(now.getHours()).padStart(2, '0');
+  let min = String(now.getMinutes()).padStart(2, '0');
+  let ss = String(now.getSeconds()).padStart(2, '0');
+
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`;
+}
+
+const rotuloMap = {
+  "Al2O3": "Al2O3/",
+  "CaO": "CaO/",
+  "MgO": "MgO/",
+  "MnO": "MnO/",
+  "P Axial": "P./P.AXIAL/",
+  "P Radial": "P./P.Radial/",
+  "SiO2": "SiO2/",
+  "TiO2": "TiO2/"
+};
+
+let dataStartIndex = -1;
+for (let i = 0; i < lines.length; i++) {
+  if ((typeof lines[i] === 'string') && (lines[i].includes('Legenda') || lines[i].includes('Tipo'))) {
+    dataStartIndex = i + 1;
+    break;
+  }
+}
+
+if (dataStartIndex === -1) {
+  console.error('Erro: Cabecalho nao encontrado no arquivo CSV');
+  process.exit(1);
+}
+
+let sampleGroups = {};
+let sampleOrder = [];
+
+// Processamento dos dados
+for (let i = dataStartIndex; i < lines.length; i++) {
+  let line = lines[i];
+  if (typeof line !== 'string') continue;
+
+  line = line.trim();
+  if (!line) continue;
+
+  // Remove as aspas duplas do início se existirem
+  if (line.startsWith('"')) {
+    line = line.substring(1);
+  }
+  // Remove as aspas duplas do fim se existirem
+  if (line.endsWith('"')) {
+    line = line.substring(0, line.length - 1);
+  }
+
+  // Separa por "," que é o delimitador real
+  let columns = line.split(/,/).map(col => col.replace(/^"|"$/g, '').trim());
+
+  if (columns.length < 6) continue;
+
+  let sampleId = columns[0].replaceAll('.', '_');
+  let tipo = columns[1].trim();
+  let rotulo = columns[4].trim();
+  let concentracao = columns[5];
+
+  if (tipo !== 'Amostra') continue;
+
+  let value = parseFloat(concentracao.replace(',', '.'));
+  if (isNaN(value)) continue;
+
+  if (!sampleGroups[sampleId]) {
+    sampleGroups[sampleId] = {
+      elements: {}
+    };
+    sampleOrder.push(sampleId);
+  }
+
+  for (let [elementKey, regex] of Object.entries(rotuloMap)) {
+    if (rotulo.includes(regex)) {
+      sampleGroups[sampleId].elements[elementKey] = value;
+      break;
+    }
+  }
+}
+
+// Divide as amostras em batches de 12
+let batches = [];
+let totalBatches = Math.ceil(sampleOrder.length / 12);
+
+for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+  let messagesWithoutTimestamp = [];
+  let timestampMessagesNow = [];
+  let timestampNow = getBrasiliaTimestamp();
+
+  for (let i = 0; i < 12; i++) {
+    let sampleIndex = batchIndex * 12 + i;
+    let sampleId = sampleOrder[sampleIndex];
+    let amostraPrefix = `Amostra${i + 1}`;
+
+    if (sampleId && sampleGroups[sampleId]) {
+      let sampleData = sampleGroups[sampleId];
+
+      messagesWithoutTimestamp.push({
+        payload: {
+          messageType: "Variable",
+          namespace: 1,
+          variableName: buildVariablePath(`${amostraPrefix}_Sample`),
+          variableValue: sampleId
+        }
+      });
+
+      timestampMessagesNow.push({
+        payload: {
+          messageType: "Variable",
+          namespace: 1,
+          variableName: buildVariablePath(`${amostraPrefix}_Time_Stamp`),
+          variableValue: timestampNow
+        }
+      });
+
+      for (let elementKey of Object.keys(rotuloMap)) {
+        let value = sampleData.elements[elementKey] ?? 0;
+        messagesWithoutTimestamp.push({
+          payload: {
+            messageType: "Variable",
+            namespace: 1,
+            variableName: buildVariablePath(`${amostraPrefix}_${elementKey}`),
+            variableValue: value
+          }
+        });
+      }
+    } else {
+      // Caso a amostra (sampleId) não exista (preenchendo o resto do batch)
+      timestampMessagesNow.push({
+        payload: {
+          messageType: "Variable",
+          namespace: 1,
+          variableName: buildVariablePath(`${amostraPrefix}_Time_Stamp`),
+          variableValue: timestampNow
+        }
+      });
+
+      messagesWithoutTimestamp.push({
+        payload: {
+          messageType: "Variable",
+          namespace: 1,
+          variableName: buildVariablePath(`${amostraPrefix}_Sample`),
+          variableValue: ""
+        }
+      });
+
+      for (let elementKey of Object.keys(rotuloMap)) {
+        messagesWithoutTimestamp.push({
+          payload: {
+            messageType: "Variable",
+            namespace: 1,
+            variableName: buildVariablePath(`${amostraPrefix}_${elementKey}`),
+            variableValue: 0
+          }
+        });
+      }
+    }
+  }
+
+  // Agrega as mensagens do batch atual
+  batches.push([messagesWithoutTimestamp, timestampMessagesNow]);
+}
+
+// Exibe os resultados (console.log é removido no código final de produção do Node-RED)
+
+console.log('\n--- Resumo ---');
+console.log(`Total de batches: ${batches.length}`);
+console.log(`Total de amostras processadas: ${sampleOrder.length}`);
+console.log('Amostras por batch: 12');
+
+batches.forEach((batch, index) => {
+  const [messages, timestamps] = batch;
+  const samplesInBatch = timestamps.length;
+  console.log(`\\Batch ${index + 1}: ${messages.length} mensagens, ${timestamps.length} timestamps`);
+});
+
+
+// Armazena os batches no flow context para uso posterior
+flow.set('batches', batches);
+
+// Atualiza o status do node
+node.status({
+  fill: "green",
+  shape: "dot",
+  text: `${ batches.length } batches gerados (${sampleOrder.length} amostras)`
+});
+
+// Retorna informações sobre o processamento
+return {
+  payload: {
+    totalBatches: batches.length,
+    totalSamples: sampleOrder.length,
+    samplesPerBatch: 12,
+    message: `${ batches.length } batches prontos. Use 'send-all-batches' para enviar ao OPC.`
+  }
+};

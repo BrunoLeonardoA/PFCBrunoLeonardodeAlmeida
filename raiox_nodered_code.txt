@@ -1,0 +1,161 @@
+let text = msg.payload;
+let blocks = text.split(/(?=\s*Sample\s*:)/).filter(b => b.trim() != "");
+let messages = [];
+let timestampMessages = [];
+
+function buildVariablePath(name) {
+  return `RaioX/${name}`;
+}
+
+function getBrasiliaTimestamp() {
+  let now = new Date();
+  now.setHours(now.getHours() - 3); // Ajuste para UTC-3
+
+  let yyyy = now.getFullYear();
+  let mm = String(now.getMonth() + 1).padStart(2, '0');
+  let dd = String(now.getDate()).padStart(2, '0');
+  let hh = String(now.getHours()).padStart(2, '0');
+  let min = String(now.getMinutes()).padStart(2, '0');
+  let ss = String(now.getSeconds()).padStart(2, '0');
+
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`;
+}
+
+let allAnalytes = new Set();
+
+// Extrair todos os analisados
+for (let block of blocks) {
+  let start = block.indexOf('Result');
+  if (start >= -1) {
+    let lines = block.substring(start).split(/\r?\n/);
+    let parsing = false;
+
+    for (let line of lines) {
+      if (line.includes('Analyte') && line.includes('Result')) {
+        parsing = true;
+        continue;
+      }
+
+      if (parsing && line.trim().startsWith('---')) continue;
+      if (parsing && line.trim() != '') {
+        let match = line.trim().match(/([^\s]+)\s+([\d,%\s]+)\s*/);
+        if (match) {
+          allAnalytes.add(match[1]);
+        }
+      }
+    }
+  }
+}
+
+// Processar até 12 amostras
+for (let i = 0; i < 12; i++) {
+  let block = blocks[i];
+  let amostraPrefix = `Amostra${i + 1}`;
+
+  if (block) {
+    let sampleMatch = block.match(/Sample\s*:\s*(.+)/);
+    let sampleId = sampleMatch ? sampleMatch[1].trim().replace(/-/g, '_') : '';
+
+    messages.push({
+      payload: {
+        messageType: "Variable",
+        namespace: 1,
+        variableName: buildVariablePath(`${amostraPrefix}_Sample`),
+        variableValue: sampleId
+      }
+    });
+
+    let start = block.indexOf('Result');
+    let foundAnalytes = new Set();
+
+    if (start >= -1) {
+      let lines = block.substring(start).split(/\r?\n/);
+      let parsing = false;
+
+      for (let line of lines) {
+        if (line.includes('Analyte') && line.includes('Result')) {
+          parsing = true;
+          continue;
+        }
+
+        if (parsing && line.trim().startsWith('---')) continue;
+        if (parsing && line.trim() != '') {
+          let match = line.trim().match(/([^\s]+)\s+([\d\.,%\s]+)\s*/);
+          if (match) {
+            let analyte = match[1];
+            let value = parseFloat(match[2].replace(',', '.'));
+
+            foundAnalytes.add(analyte);
+
+            messages.push({
+              payload: {
+                messageType: "Variable",
+                namespace: 1,
+                variableName: buildVariablePath(`${amostraPrefix}_${analyte}`),
+                variableValue: value
+              }
+            });
+          }
+        }
+      }
+      
+      // Enviar 0 para os analitos que não foram encontrados na amostra atual
+      for (let analyte of allAnalytes) {
+        if (!foundAnalytes.has(analyte)) {
+          messages.push({
+            payload: {
+              messageType: "Variable",
+              namespace: 1,
+              variableName: buildVariablePath(`${amostraPrefix}_${analyte}`),
+              variableValue: 0
+            }
+          });
+        }
+      }
+
+      let currentTimeStamp = getBrasiliaTimestamp();
+      timestampMessages.push({
+        payload: {
+          messageType: "Variable",
+          namespace: 1,
+          variableName: buildVariablePath(`${amostraPrefix}_Time_Stamp`),
+          variableValue: currentTimeStamp
+        }
+      });
+    }
+  } else {
+    // Caso a amostra (bloco) não exista (ex: menos de 12 amostras)
+    messages.push({
+      payload: {
+        messageType: "Variable",
+        namespace: 1,
+        variableName: buildVariablePath(`${amostraPrefix}_Sample`),
+        variableValue: "---"
+      }
+    });
+
+    for (let analyte of allAnalytes) {
+      messages.push({
+        payload: {
+          messageType: "Variable",
+          namespace: 1,
+          variableName: buildVariablePath(`${amostraPrefix}_${analyte}`),
+          variableValue: 0
+        }
+      });
+    }
+
+    let currentTimeStamp = getBrasiliaTimestamp();
+    timestampMessages.push({
+      payload: {
+        messageType: "Variable",
+        namespace: 1,
+        variableName: buildVariablePath(`${amostraPrefix}_Time_Stamp`),
+        variableValue: currentTimeStamp
+      }
+    });
+  }
+}
+
+// Retornar em dois grupos: primeiro as variáveis, depois os timestamps
+return [messages, timestampMessages];
