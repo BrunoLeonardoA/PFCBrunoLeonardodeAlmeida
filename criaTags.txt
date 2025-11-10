@@ -1,0 +1,80 @@
+const amostras = 12;
+
+const variaveisRaioX = [
+    { name: "Al2O3", datatype: "Float" },
+    { name: "CaO", datatype: "Float" },
+    { name: "Fe", datatype: "Float" },
+    { name: "MgO", datatype: "Float" },
+    { name: "MnO", datatype: "Float" },
+    { name: "P", datatype: "Float" },
+    { name: "Sample", datatype: "String" },
+    { name: "SiO2", datatype: "Float" },
+    { name: "TimeStamp", datatype: "String" },
+    { name: "TiO2", datatype: "Float" },
+];
+
+const variaveisICP = [
+    { name: "Al2O3", datatype: "Float" },
+    { name: "CaO", datatype: "Float" },
+    { name: "MgO", datatype: "Float" },
+    { name: "MnO", datatype: "Float" },
+    { name: "P_Axial", datatype: "Float" },
+    { name: "P_Radial", datatype: "Float" },
+    { name: "Sample", datatype: "String" },
+    { name: "SiO2", datatype: "Float" },
+    { name: "TimeStamp", datatype: "String" },
+    { name: "TiO2", datatype: "Float" },
+];
+
+const messages = [];
+
+// Variáveis para RaioX
+for (let i = 1; i <= amostras; i++) {
+    variaveisRaioX.forEach(v => {
+        messages.push({
+            payload: { opcuaCommand: "addVariable" },
+            topic: `ns=1;s=RaioX/Amostra${i}_${v.name};datatype=${v.datatype}`
+        });
+    });
+}
+
+// Variáveis para ICP01
+for (let i = 1; i <= amostras; i++) {
+    variaveisICP.forEach(v => {
+        messages.push({
+            payload: { opcuaCommand: "addVariable" },
+            topic: `ns=1;s=ICP01/Amostra${i}_${v.name};datatype=${v.datatype}`
+        });
+    });
+}
+
+// Variáveis para ICP02
+for (let i = 1; i <= amostras; i++) {
+    variaveisICP.forEach(v => {
+        messages.push({
+            payload: { opcuaCommand: "addVariable" },
+            topic: `ns=1;s=ICP02/Amostra${i}_${v.name};datatype=${v.datatype}`
+        });
+    });
+}
+
+
+// Variáveis para balanças BL-LF-01 a 15
+for (let i = 1; i <= 15; i++) {
+    const id = i.toString().padStart(2, '0');
+    messages.push({
+        payload: { opcuaCommand: "addVariable" },
+        topic: `ns=1;s=BL-LF-${id};datatype=Float`
+    });
+}
+
+// Variáveis para balanças BL-LQ-01 a 15
+for (let i = 1; i <= 15; i++) {
+    const id = i.toString().padStart(2, '0');
+    messages.push({
+        payload: { opcuaCommand: "addVariable" },
+        topic: `ns=1;s=BL-LQ-${id};datatype=Float`
+    });
+}
+
+return [messages];
